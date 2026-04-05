@@ -3,4 +3,3 @@ pandas
 numpy
 plotly
 requests
-openai>=1.0.0
