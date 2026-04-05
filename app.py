@@ -1,7 +1,8 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.express as px
+import requests
 import os
 
 # -------------------------------
@@ -10,16 +11,12 @@ import os
 st.set_page_config(page_title="CDI Intelligence Dashboard", layout="wide")
 
 # -------------------------------
-# PREMIUM DARK UI + FLOAT CARDS
+# PREMIUM UI
 # -------------------------------
 st.markdown("""
 <style>
-body {
-    background:#0f172a;
-    color:white;
-}
+body { background:#0f172a; color:white; }
 
-/* FLOATING CARD */
 .metric-card {
     background: rgba(255,255,255,0.08);
     backdrop-filter: blur(15px);
@@ -35,43 +32,72 @@ body {
     transform: translateY(-12px) scale(1.05);
     box-shadow: 0 20px 50px rgba(0,0,0,0.6);
 }
-
-.metric-title {
-    font-size: 16px;
-    color: #9ca3af;
-}
-
-.metric-value {
-    font-size: 30px;
-    font-weight: bold;
-}
-
-/* BUTTON FIX */
-button {
-    width:100%;
-    border-radius:12px !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------------
-# TITLE
-# -------------------------------
 st.title("🧠 CDI Intelligence Dashboard")
 
 # -------------------------------
-# DATA INPUT
+# FETCH UNISWAP DATA
 # -------------------------------
-st.sidebar.header("📂 Data Input")
+def fetch_uniswap_data():
+    url = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3"
 
-mode = st.sidebar.radio("Input Type", ["Sample Data", "Upload CSV"])
+    query = """
+    {
+      pools(first: 10, orderBy: totalValueLockedUSD, orderDirection: desc) {
+        totalValueLockedUSD
+        volumeUSD
+      }
+    }
+    """
+
+    try:
+        res = requests.post(url, json={'query': query})
+        data = res.json()
+
+        tvl = [float(p["totalValueLockedUSD"]) for p in data["data"]["pools"]]
+        volume = [float(p["volumeUSD"]) for p in data["data"]["pools"]]
+
+        return tvl, volume
+    except:
+        return None, None
+
+# -------------------------------
+# INPUT
+# -------------------------------
+st.sidebar.header("📂 Data Source")
+
+mode = st.sidebar.radio("Choose", [
+    "Sample Data",
+    "Upload CSV",
+    "Live Uniswap Data"
+])
+
 file = None
-
 if mode == "Upload CSV":
     file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
-if file:
+# -------------------------------
+# DATA LOADING
+# -------------------------------
+if mode == "Upload CSV" and file:
     df = pd.read_csv(file)
+
+elif mode == "Live Uniswap Data":
+    tvl, volume = fetch_uniswap_data()
+
+    if tvl:
+        df = pd.DataFrame({
+            "tokens": tvl,
+            "votes": np.random.randint(50, 500, len(tvl)),
+            "transactions": volume
+        })
+        st.success("🌐 Using live Uniswap data")
+    else:
+        st.error("Failed to fetch data")
+        st.stop()
+
 else:
     df = pd.DataFrame({
         "tokens":[5000,4200,3900,3500,3000,2500,2000],
@@ -83,14 +109,14 @@ else:
 # VALIDATION
 # -------------------------------
 if not {"tokens","votes","transactions"}.issubset(df.columns):
-    st.error("CSV must contain: tokens, votes, transactions")
+    st.error("CSV must contain tokens, votes, transactions")
     st.stop()
 
 st.subheader("📊 Dataset")
-st.dataframe(df, use_container_width=True)
+st.dataframe(df)
 
 # -------------------------------
-# FUNCTIONS
+# METRIC FUNCTIONS
 # -------------------------------
 def gini(x):
     x = np.sort(x)
@@ -105,7 +131,7 @@ def entropy(x):
     return -np.sum(p*np.log2(p+1e-9))
 
 # -------------------------------
-# CALCULATIONS
+# CALCULATE CDI
 # -------------------------------
 tokens = df["tokens"].values
 votes = df["votes"].values
@@ -117,77 +143,74 @@ e = entropy(tx)/np.log2(len(tx))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# CLICKABLE FLOAT CARDS
+# CLICKABLE CARDS
 # -------------------------------
 if "metric" not in st.session_state:
     st.session_state.metric = None
 
-def floating_card(title, value, key):
-    if st.button("", key=key):
+def card(title, val, key):
+    if st.button(title, key=key):
         st.session_state.metric = key
 
     st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-title">{title}</div>
-        <div class="metric-value">{value}</div>
+        <h4>{title}</h4>
+        <h2>{val}</h2>
     </div>
     """, unsafe_allow_html=True)
 
 st.subheader("📊 Metrics")
 
-col1, col2, col3, col4 = st.columns(4)
+c1,c2,c3,c4 = st.columns(4)
 
-with col1:
-    floating_card("Gini", f"{g:.3f}", "gini")
-with col2:
-    floating_card("HHI", f"{h:.3f}", "hhi")
-with col3:
-    floating_card("Entropy", f"{e:.3f}", "entropy")
-with col4:
-    floating_card("CDI", f"{cdi:.3f}", "cdi")
+with c1: card("Gini", f"{g:.3f}", "gini")
+with c2: card("HHI", f"{h:.3f}", "hhi")
+with c3: card("Entropy", f"{e:.3f}", "entropy")
+with c4: card("CDI", f"{cdi:.3f}", "cdi")
 
 # -------------------------------
-# POPUP EXPLANATION
+# POPUP INFO
 # -------------------------------
 if st.session_state.metric == "gini":
-    st.info("📊 Gini → Measures token inequality. Lower = better decentralization.")
+    st.info("Gini → inequality (lower is better)")
 elif st.session_state.metric == "hhi":
-    st.info("🏛️ HHI → Measures governance concentration. Lower = better.")
+    st.info("HHI → governance concentration")
 elif st.session_state.metric == "entropy":
-    st.info("🔄 Entropy → Measures activity spread. Higher = better.")
+    st.info("Entropy → activity diversity")
 elif st.session_state.metric == "cdi":
-    st.success(f"🧠 CDI Score = {cdi:.3f}")
+    st.success(f"CDI Score = {cdi:.3f}")
 
 # -------------------------------
-# CHARTS
+# PLOTLY CHARTS
 # -------------------------------
-st.subheader("📈 Analytics")
+st.subheader("📈 Interactive Analytics")
 
-colA, colB = st.columns(2)
+chart_df = pd.DataFrame({
+    "Metric":["Gini","HHI","Entropy"],
+    "Value":[g,h,e]
+})
 
-with colA:
-    fig, ax = plt.subplots()
-    ax.bar(["Gini","HHI","Entropy"], [g,h,e])
-    st.pyplot(fig)
+fig_bar = px.bar(chart_df, x="Metric", y="Value", color="Metric", text="Value")
+fig_bar.update_layout(transition_duration=800)
 
-with colB:
-    fig2, ax2 = plt.subplots()
-    ax2.pie([g,h,e], labels=["Gini","HHI","Entropy"], autopct="%1.1f%%")
-    st.pyplot(fig2)
+fig_pie = px.pie(chart_df, names="Metric", values="Value")
+
+st.plotly_chart(fig_bar, use_container_width=True)
+st.plotly_chart(fig_pie, use_container_width=True)
 
 # -------------------------------
 # GRAPH INSIGHTS
 # -------------------------------
-st.subheader("📊 Graph Insights")
+st.subheader("📊 Insights")
 
 st.markdown("""
-- Bar chart shows contribution strength  
+- Bar chart shows strength of each decentralization component  
 - Pie chart shows proportional contribution  
-- High entropy + lower governance = decentralization paradox
+- High entropy + lower governance → decentralization paradox
 """)
 
 # -------------------------------
-# GPT AI (SAFE VERSION)
+# GPT AI
 # -------------------------------
 st.subheader("🤖 AI Explanation")
 
@@ -206,18 +229,17 @@ if use_gpt and gpt_available:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{
-                "role": "user",
-                "content": f"Explain decentralization with G={g:.2f}, H={h:.2f}, E={e:.2f}, CDI={cdi:.2f}"
+                "role":"user",
+                "content":f"Explain CDI with G={g:.2f}, H={h:.2f}, E={e:.2f}, CDI={cdi:.2f}"
             }]
         )
         st.write(response.choices[0].message.content)
-
-    except Exception as err:
-        st.error(f"API Error: {err}")
+    except Exception as e:
+        st.error(f"API Error: {e}")
 
 else:
     if not gpt_available:
-        st.warning("⚠️ GPT not available (install openai & add API key)")
+        st.warning("GPT not available")
     elif cdi < 0.3:
         st.error("Highly Centralized")
     elif cdi < 0.6:
@@ -228,15 +250,14 @@ else:
 # -------------------------------
 # FORMULA
 # -------------------------------
-st.subheader("📐 CDI Formula")
+st.subheader("📐 Formula")
 
 st.latex(r"CDI = \frac{G + H + E}{3}")
 
 st.markdown("""
-Where:
-- G = (1 - Gini)
-- H = (1 - normalized HHI)
-- E = normalized entropy
+G = ownership decentralization  
+H = governance decentralization  
+E = usage decentralization  
 """)
 
 # -------------------------------
