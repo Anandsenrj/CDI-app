@@ -2,50 +2,81 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import requests
+import json
 
+# -------------------------------
+# CONFIG
+# -------------------------------
 st.set_page_config(page_title="CDI Dashboard", layout="wide")
 
-st.title("🧠 CDI Multi-Protocol Dashboard")
+# -------------------------------
+# UI STYLE
+# -------------------------------
+st.markdown("""
+<style>
+body { background:#0f172a; color:white; }
+
+.metric-card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+    border-radius: 15px;
+    padding: 20px;
+    text-align:center;
+    transition:0.3s;
+}
+.metric-card:hover {
+    transform:translateY(-8px) scale(1.05);
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🧠 CDI Intelligence Dashboard")
 
 # -------------------------------
-# FETCH DATA (SIMULATED REAL)
+# INPUT
 # -------------------------------
-def fetch_protocol_data(name):
-    base = {
-        "Uniswap": 30000000,
-        "Aave": 25000000,
-        "Curve": 20000000
-    }
+mode = st.sidebar.radio("Data Source", ["Sample Data", "Upload CSV"])
 
-    tokens = [base[name] / (i+1) for i in range(7)]
-    votes = np.random.randint(100, 500, 7)
-    transactions = [base[name] / (i+2) for i in range(7)]
+file = None
+if mode == "Upload CSV":
+    file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
-    return pd.DataFrame({
-        "tokens": tokens,
-        "votes": votes,
-        "transactions": transactions
+if file:
+    df = pd.read_csv(file)
+else:
+    df = pd.DataFrame({
+        "tokens":[5000,4200,3900,3500,3000,2500,2000],
+        "votes":[300,250,200,180,160,140,120],
+        "transactions":[1200,1100,1050,980,900,850,780]
     })
 
 # -------------------------------
-# SELECT PROTOCOL
+# 🔥 FIX DICT ERROR
 # -------------------------------
-protocol = st.sidebar.selectbox(
-    "Select Protocol",
-    ["Uniswap", "Aave", "Curve"]
-)
+def extract_usd(x):
+    if isinstance(x, dict):
+        return x.get("usd", 0)
+    if isinstance(x, str) and "usd" in x:
+        try:
+            return json.loads(x)["usd"]
+        except:
+            return 0
+    return x
 
-df = fetch_protocol_data(protocol)
+df["tokens"] = df["tokens"].apply(extract_usd)
 
 # -------------------------------
-# FIX (DICT ISSUE)
+# VALIDATION
 # -------------------------------
-if isinstance(df["tokens"].iloc[0], dict):
-    df["tokens"] = df["tokens"].apply(lambda x: x.get("usd", 0))
+if not {"tokens","votes","transactions"}.issubset(df.columns):
+    st.error("CSV must contain tokens, votes, transactions")
+    st.stop()
+
+st.subheader("📊 Dataset")
+st.dataframe(df)
 
 # -------------------------------
-# METRICS
+# METRICS FUNCTIONS
 # -------------------------------
 def gini(x):
     x = np.sort(x)
@@ -59,69 +90,103 @@ def entropy(x):
     p = x/np.sum(x)
     return -np.sum(p*np.log2(p+1e-9))
 
+# -------------------------------
+# CALCULATE
+# -------------------------------
 g = 1 - gini(df["tokens"])
-h = 1 - (hhi(df["votes"]) / 10000)
+h = 1 - (hhi(df["votes"])/10000)
 e = entropy(df["transactions"]) / np.log2(len(df))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# SHOW METRICS
+# FLOATING CARDS
 # -------------------------------
+st.subheader("📊 Metrics")
+
 col1,col2,col3,col4 = st.columns(4)
 
-col1.metric("Gini", round(g,3))
-col2.metric("HHI", round(h,3))
-col3.metric("Entropy", round(e,3))
-col4.metric("CDI", round(cdi,3))
+col1.markdown(f"<div class='metric-card'>Gini<br><b>{g:.3f}</b></div>", unsafe_allow_html=True)
+col2.markdown(f"<div class='metric-card'>HHI<br><b>{h:.3f}</b></div>", unsafe_allow_html=True)
+col3.markdown(f"<div class='metric-card'>Entropy<br><b>{e:.3f}</b></div>", unsafe_allow_html=True)
+col4.markdown(f"<div class='metric-card'>CDI<br><b>{cdi:.3f}</b></div>", unsafe_allow_html=True)
 
 # -------------------------------
-# MULTI-PROTOCOL COMPARISON
+# CHARTS
 # -------------------------------
-st.subheader("📊 Protocol Comparison")
+st.subheader("📈 Interactive Charts")
+
+chart_df = pd.DataFrame({
+    "Metric":["Gini","HHI","Entropy"],
+    "Value":[g,h,e]
+})
+
+fig1 = px.bar(chart_df, x="Metric", y="Value", color="Metric", text="Value")
+fig1.update_layout(transition_duration=800)
+
+fig2 = px.pie(chart_df, names="Metric", values="Value")
+
+st.plotly_chart(fig1, use_container_width=True)
+st.plotly_chart(fig2, use_container_width=True)
+
+# -------------------------------
+# MULTI PROTOCOL
+# -------------------------------
+st.subheader("📊 Multi-Protocol Comparison")
 
 protocols = ["Uniswap","Aave","Curve"]
 results = []
 
 for p in protocols:
-    d = fetch_protocol_data(p)
-    g_ = 1 - gini(d["tokens"])
-    h_ = 1 - (hhi(d["votes"]) / 10000)
-    e_ = entropy(d["transactions"]) / np.log2(len(d))
+    tokens = np.random.uniform(1e6,1e7,10)
+    votes = np.random.randint(50,500,10)
+    tx = np.random.uniform(1e5,1e6,10)
+
+    g_ = 1 - gini(tokens)
+    h_ = 1 - (hhi(votes)/10000)
+    e_ = entropy(tx)/np.log2(len(tx))
     c_ = (g_+h_+e_)/3
 
-    results.append([p, g_, h_, e_, c_])
+    results.append([p,c_])
 
-comp_df = pd.DataFrame(results, columns=["Protocol","Gini","HHI","Entropy","CDI"])
+comp_df = pd.DataFrame(results, columns=["Protocol","CDI"])
 
-fig_comp = px.bar(comp_df, x="Protocol", y="CDI", color="Protocol", title="CDI Comparison")
+fig_comp = px.bar(comp_df, x="Protocol", y="CDI", color="Protocol")
 st.plotly_chart(fig_comp, use_container_width=True)
 
 # -------------------------------
-# TIME SERIES (SIMULATED)
+# TIME SERIES
 # -------------------------------
-st.subheader("📈 Time-Series Analysis")
+st.subheader("📈 CDI Over Time")
 
-days = pd.date_range(end=pd.Timestamp.today(), periods=10)
+dates = pd.date_range(end=pd.Timestamp.today(), periods=12)
 
-ts_data = pd.DataFrame({
-    "Date": days,
-    "CDI": np.random.uniform(cdi-0.05, cdi+0.05, len(days))
+ts_df = pd.DataFrame({
+    "Date": dates,
+    "CDI": np.random.uniform(cdi-0.05, cdi+0.05, len(dates))
 })
 
-fig_ts = px.line(ts_data, x="Date", y="CDI", markers=True, title="CDI Over Time")
+fig_ts = px.line(ts_df, x="Date", y="CDI", markers=True)
 st.plotly_chart(fig_ts, use_container_width=True)
 
 # -------------------------------
-# INSIGHTS
+# AI INSIGHTS (SAFE)
 # -------------------------------
-st.subheader("🤖 Insights")
+st.subheader("🤖 AI Insights")
 
 if cdi < 0.3:
-    st.error("Highly Centralized")
+    st.error("🔴 Highly Centralized")
 elif cdi < 0.6:
-    st.warning("Moderately Decentralized")
+    st.warning("🟡 Moderately Decentralized")
 else:
-    st.success("Highly Decentralized")
+    st.success("🟢 Highly Decentralized")
+
+st.markdown(f"""
+- Ownership Score: {g:.2f}  
+- Governance Score: {h:.2f}  
+- Usage Score: {e:.2f}  
+
+👉 Overall system shows **{'strong' if cdi>0.6 else 'moderate' if cdi>0.3 else 'weak'} decentralization**
+""")
 
 # -------------------------------
 # FORMULA
