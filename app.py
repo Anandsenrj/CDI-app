@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 import os
 
 # -------------------------------
-# CONFIG
+# PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="CDI Intelligence", layout="wide")
+st.set_page_config(page_title="CDI Dashboard", layout="wide")
 
 # -------------------------------
-# PREMIUM DARK UI (NO TOGGLE)
+# PREMIUM UI CSS
 # -------------------------------
 st.markdown("""
 <style>
@@ -24,40 +24,16 @@ body {
     backdrop-filter:blur(12px);
     border-radius:20px;
     padding:20px;
+    text-align:center;
     transition:0.3s;
-    position:relative;
 }
-
 .card:hover {
-    transform:translateY(-8px) scale(1.03);
+    transform:translateY(-8px);
 }
 
-/* TOOLTIP */
-.tooltip {
-    visibility:hidden;
-    background:#111;
-    color:#fff;
-    padding:10px;
-    border-radius:8px;
-    position:absolute;
-    bottom:110%;
-    left:50%;
-    transform:translateX(-50%);
-    width:220px;
-    font-size:13px;
-}
-
-.card:hover .tooltip {
-    visibility:visible;
-}
-
-/* FADE */
-.fade {
-    animation:fadeIn 1s ease-in;
-}
-@keyframes fadeIn {
-    from {opacity:0;}
-    to {opacity:1;}
+button {
+    width:100%;
+    border-radius:12px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -65,7 +41,37 @@ body {
 # -------------------------------
 # TITLE
 # -------------------------------
-st.markdown("<h1 class='fade'>🧠 CDI Intelligence Dashboard</h1>", unsafe_allow_html=True)
+st.title("🧠 CDI Intelligence Dashboard")
+
+# -------------------------------
+# DATA INPUT
+# -------------------------------
+st.sidebar.header("📂 Data Input")
+
+mode = st.sidebar.radio("Input Type", ["Sample Data", "Upload CSV"])
+file = None
+
+if mode == "Upload CSV":
+    file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+
+if file:
+    df = pd.read_csv(file)
+else:
+    df = pd.DataFrame({
+        "tokens":[5000,4200,3900,3500,3000,2500,2000],
+        "votes":[300,250,200,180,160,140,120],
+        "transactions":[1200,1100,1050,980,900,850,780]
+    })
+
+# -------------------------------
+# VALIDATION
+# -------------------------------
+if not {"tokens","votes","transactions"}.issubset(df.columns):
+    st.error("CSV must contain: tokens, votes, transactions")
+    st.stop()
+
+st.subheader("📊 Dataset")
+st.dataframe(df, use_container_width=True)
 
 # -------------------------------
 # FUNCTIONS
@@ -83,62 +89,52 @@ def entropy(x):
     return -np.sum(p*np.log2(p+1e-9))
 
 # -------------------------------
-# DATA INPUT
+# CALCULATIONS
 # -------------------------------
-st.sidebar.header("📂 Data Input")
+tokens = df["tokens"].values
+votes = df["votes"].values
+tx = df["transactions"].values
 
-mode = st.sidebar.radio("Input", ["Sample", "Upload CSV"])
-
-file = None
-if mode == "Upload CSV":
-    file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
-
-if file:
-    df = pd.read_csv(file)
-else:
-    df = pd.DataFrame({
-        "tokens":[5000,4200,3900,3500,3000,2500,2000],
-        "votes":[300,250,200,180,160,140,120],
-        "transactions":[1200,1100,1050,980,900,850,780]
-    })
-
-# -------------------------------
-# CALCULATE
-# -------------------------------
-g = 1 - gini(df["tokens"].values)
-h = 1 - (hhi(df["votes"].values)/10000)
-e = entropy(df["transactions"].values)/np.log2(len(df))
+g = 1 - gini(tokens)
+h = 1 - (hhi(votes)/10000)
+e = entropy(tx)/np.log2(len(tx))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# METRIC CARDS + TOOLTIP
+# CLICKABLE CARDS
 # -------------------------------
+if "metric" not in st.session_state:
+    st.session_state.metric = None
+
+def card(title, value, key):
+    if st.button(f"{title}\n{value}", key=key):
+        st.session_state.metric = key
+
 st.subheader("📊 Metrics")
 
-cols = st.columns(4)
+c1,c2,c3,c4 = st.columns(4)
 
-def card(title,val,desc):
-    st.markdown(f"""
-    <div class="card fade">
-        <h4>{title}</h4>
-        <h2>{val}</h2>
-        <div class="tooltip">{desc}</div>
-    </div>
-    """, unsafe_allow_html=True)
+with c1: card("Gini", f"{g:.3f}", "gini")
+with c2: card("HHI", f"{h:.3f}", "hhi")
+with c3: card("Entropy", f"{e:.3f}", "entropy")
+with c4: card("CDI", f"{cdi:.3f}", "cdi")
 
-with cols[0]:
-    card("Gini",f"{g:.3f}","Measures token inequality (lower = better)")
-with cols[1]:
-    card("HHI",f"{h:.3f}","Measures governance concentration")
-with cols[2]:
-    card("Entropy",f"{e:.3f}","Measures activity distribution")
-with cols[3]:
-    card("CDI",f"{cdi:.3f}","Overall decentralization score")
+# -------------------------------
+# POPUP EXPLANATION
+# -------------------------------
+if st.session_state.metric == "gini":
+    st.info("📊 Gini measures inequality. Lower = better decentralization.")
+elif st.session_state.metric == "hhi":
+    st.info("🏛️ HHI measures governance concentration. Lower = better.")
+elif st.session_state.metric == "entropy":
+    st.info("🔄 Entropy measures activity spread. Higher = better.")
+elif st.session_state.metric == "cdi":
+    st.success(f"🧠 CDI Score = {cdi:.3f}")
 
 # -------------------------------
 # CHARTS
 # -------------------------------
-st.subheader("📈 Analytics")
+st.subheader("📈 Charts")
 
 col1,col2 = st.columns(2)
 
@@ -157,57 +153,65 @@ with col2:
 # -------------------------------
 st.subheader("📊 Graph Insights")
 
-st.markdown(f"""
-- The **bar chart** shows relative strength of decentralization factors.  
-- Higher bars = stronger decentralization contribution.
-
-- The **pie chart** shows proportional contribution:
-  - Entropy dominates → strong user activity  
-  - Lower Gini/HHI → ownership/governance imbalance  
-
-👉 This pattern suggests **Decentralization Paradox**:
-High usage but centralized control.
+st.markdown("""
+- Bar chart shows contribution strength  
+- Pie chart shows proportion distribution  
+- High entropy + low governance = decentralization paradox
 """)
 
 # -------------------------------
-# GPT AI INSIGHTS
+# SAFE GPT HANDLING
 # -------------------------------
 st.subheader("🤖 AI Explanation")
 
-use_gpt = st.toggle("Use GPT AI (requires API key)", False)
+use_gpt = st.toggle("Use GPT AI", False)
 
-if use_gpt:
+try:
     import openai
     openai.api_key = os.getenv("OPENAI_API_KEY")
+    gpt_available = True
+except:
+    gpt_available = False
 
-    prompt = f"""
-    Explain decentralization of a system with:
-    Gini={g:.2f}, HHI={h:.2f}, Entropy={e:.2f}, CDI={cdi:.2f}.
-    Give insights and recommendations.
-    """
-
+if use_gpt and gpt_available:
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
-            messages=[{"role":"user","content":prompt}]
+            messages=[{
+                "role":"user",
+                "content":f"Explain CDI with G={g:.2f}, H={h:.2f}, E={e:.2f}, CDI={cdi:.2f}"
+            }]
         )
         st.write(response["choices"][0]["message"]["content"])
     except:
-        st.error("API key missing or error occurred")
-
+        st.error("API error")
 else:
-    # Fallback AI
     if cdi < 0.3:
-        st.error("Highly centralized system")
+        st.error("Highly Centralized")
     elif cdi < 0.6:
-        st.warning("Moderately decentralized")
+        st.warning("Moderately Decentralized")
     else:
-        st.success("Highly decentralized")
+        st.success("Highly Decentralized")
+
+# -------------------------------
+# FORMULA SECTION
+# -------------------------------
+st.subheader("📐 Formula")
+
+st.latex(r"CDI = \frac{G + H + E}{3}")
+
+st.markdown("""
+Where:
+- G = (1 - Gini)
+- H = (1 - normalized HHI)
+- E = normalized entropy
+""")
 
 # -------------------------------
 # DOWNLOAD
 # -------------------------------
-st.download_button("⬇️ Download Results",
+st.download_button(
+    "⬇️ Download Results",
     pd.DataFrame({
         "Metric":["Gini","HHI","Entropy","CDI"],
         "Value":[g,h,e,cdi]
