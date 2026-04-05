@@ -7,10 +7,10 @@ import os
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="CDI Dashboard", layout="wide")
+st.set_page_config(page_title="CDI Intelligence Dashboard", layout="wide")
 
 # -------------------------------
-# PREMIUM UI CSS
+# PREMIUM DARK UI + FLOAT CARDS
 # -------------------------------
 st.markdown("""
 <style>
@@ -19,18 +19,34 @@ body {
     color:white;
 }
 
-.card {
-    background:rgba(255,255,255,0.08);
-    backdrop-filter:blur(12px);
-    border-radius:20px;
-    padding:20px;
-    text-align:center;
-    transition:0.3s;
-}
-.card:hover {
-    transform:translateY(-8px);
+/* FLOATING CARD */
+.metric-card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(15px);
+    border-radius: 18px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.4s ease;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    cursor: pointer;
 }
 
+.metric-card:hover {
+    transform: translateY(-12px) scale(1.05);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+}
+
+.metric-title {
+    font-size: 16px;
+    color: #9ca3af;
+}
+
+.metric-value {
+    font-size: 30px;
+    font-weight: bold;
+}
+
+/* BUTTON FIX */
 button {
     width:100%;
     border-radius:12px !important;
@@ -101,92 +117,108 @@ e = entropy(tx)/np.log2(len(tx))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# CLICKABLE CARDS
+# CLICKABLE FLOAT CARDS
 # -------------------------------
 if "metric" not in st.session_state:
     st.session_state.metric = None
 
-def card(title, value, key):
-    if st.button(f"{title}\n{value}", key=key):
+def floating_card(title, value, key):
+    if st.button("", key=key):
         st.session_state.metric = key
+
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-title">{title}</div>
+        <div class="metric-value">{value}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.subheader("📊 Metrics")
 
-c1,c2,c3,c4 = st.columns(4)
+col1, col2, col3, col4 = st.columns(4)
 
-with c1: card("Gini", f"{g:.3f}", "gini")
-with c2: card("HHI", f"{h:.3f}", "hhi")
-with c3: card("Entropy", f"{e:.3f}", "entropy")
-with c4: card("CDI", f"{cdi:.3f}", "cdi")
+with col1:
+    floating_card("Gini", f"{g:.3f}", "gini")
+with col2:
+    floating_card("HHI", f"{h:.3f}", "hhi")
+with col3:
+    floating_card("Entropy", f"{e:.3f}", "entropy")
+with col4:
+    floating_card("CDI", f"{cdi:.3f}", "cdi")
 
 # -------------------------------
 # POPUP EXPLANATION
 # -------------------------------
 if st.session_state.metric == "gini":
-    st.info("📊 Gini measures inequality. Lower = better decentralization.")
+    st.info("📊 Gini → Measures token inequality. Lower = better decentralization.")
 elif st.session_state.metric == "hhi":
-    st.info("🏛️ HHI measures governance concentration. Lower = better.")
+    st.info("🏛️ HHI → Measures governance concentration. Lower = better.")
 elif st.session_state.metric == "entropy":
-    st.info("🔄 Entropy measures activity spread. Higher = better.")
+    st.info("🔄 Entropy → Measures activity spread. Higher = better.")
 elif st.session_state.metric == "cdi":
     st.success(f"🧠 CDI Score = {cdi:.3f}")
 
 # -------------------------------
 # CHARTS
 # -------------------------------
-st.subheader("📈 Charts")
+st.subheader("📈 Analytics")
 
-col1,col2 = st.columns(2)
+colA, colB = st.columns(2)
 
-with col1:
-    fig,ax = plt.subplots()
-    ax.bar(["Gini","HHI","Entropy"],[g,h,e])
+with colA:
+    fig, ax = plt.subplots()
+    ax.bar(["Gini","HHI","Entropy"], [g,h,e])
     st.pyplot(fig)
 
-with col2:
-    fig2,ax2 = plt.subplots()
-    ax2.pie([g,h,e],labels=["Gini","HHI","Entropy"],autopct="%1.1f%%")
+with colB:
+    fig2, ax2 = plt.subplots()
+    ax2.pie([g,h,e], labels=["Gini","HHI","Entropy"], autopct="%1.1f%%")
     st.pyplot(fig2)
 
 # -------------------------------
-# GRAPH EXPLANATION
+# GRAPH INSIGHTS
 # -------------------------------
 st.subheader("📊 Graph Insights")
 
 st.markdown("""
 - Bar chart shows contribution strength  
-- Pie chart shows proportion distribution  
-- High entropy + low governance = decentralization paradox
+- Pie chart shows proportional contribution  
+- High entropy + lower governance = decentralization paradox
 """)
 
 # -------------------------------
-# SAFE GPT HANDLING
+# GPT AI (SAFE VERSION)
 # -------------------------------
 st.subheader("🤖 AI Explanation")
 
 use_gpt = st.toggle("Use GPT AI", False)
 
+gpt_available = False
 try:
-    import openai
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     gpt_available = True
 except:
-    gpt_available = False
+    pass
 
 if use_gpt and gpt_available:
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{
-                "role":"user",
-                "content":f"Explain CDI with G={g:.2f}, H={h:.2f}, E={e:.2f}, CDI={cdi:.2f}"
+                "role": "user",
+                "content": f"Explain decentralization with G={g:.2f}, H={h:.2f}, E={e:.2f}, CDI={cdi:.2f}"
             }]
         )
-        st.write(response["choices"][0]["message"]["content"])
-    except:
-        st.error("API error")
+        st.write(response.choices[0].message.content)
+
+    except Exception as err:
+        st.error(f"API Error: {err}")
+
 else:
-    if cdi < 0.3:
+    if not gpt_available:
+        st.warning("⚠️ GPT not available (install openai & add API key)")
+    elif cdi < 0.3:
         st.error("Highly Centralized")
     elif cdi < 0.6:
         st.warning("Moderately Decentralized")
@@ -194,9 +226,9 @@ else:
         st.success("Highly Decentralized")
 
 # -------------------------------
-# FORMULA SECTION
+# FORMULA
 # -------------------------------
-st.subheader("📐 Formula")
+st.subheader("📐 CDI Formula")
 
 st.latex(r"CDI = \frac{G + H + E}{3}")
 
