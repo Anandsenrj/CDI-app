@@ -2,7 +2,9 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import requests
 import json
+import time
 
 # -------------------------------
 # CONFIG
@@ -51,7 +53,7 @@ else:
     })
 
 # -------------------------------
-# 🔥 FIX DICT ERROR
+# FIX DICT ERROR
 # -------------------------------
 def extract_usd(x):
     if isinstance(x, dict):
@@ -76,7 +78,7 @@ st.subheader("📊 Dataset")
 st.dataframe(df)
 
 # -------------------------------
-# METRICS FUNCTIONS
+# METRIC FUNCTIONS
 # -------------------------------
 def gini(x):
     x = np.sort(x)
@@ -99,7 +101,7 @@ e = entropy(df["transactions"]) / np.log2(len(df))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# FLOATING CARDS
+# METRIC CARDS
 # -------------------------------
 st.subheader("📊 Metrics")
 
@@ -111,7 +113,7 @@ col3.markdown(f"<div class='metric-card'>Entropy<br><b>{e:.3f}</b></div>", unsaf
 col4.markdown(f"<div class='metric-card'>CDI<br><b>{cdi:.3f}</b></div>", unsafe_allow_html=True)
 
 # -------------------------------
-# CHARTS
+# PLOTLY CHARTS
 # -------------------------------
 st.subheader("📈 Interactive Charts")
 
@@ -169,7 +171,7 @@ fig_ts = px.line(ts_df, x="Date", y="CDI", markers=True)
 st.plotly_chart(fig_ts, use_container_width=True)
 
 # -------------------------------
-# AI INSIGHTS (SAFE)
+# AI INSIGHTS
 # -------------------------------
 st.subheader("🤖 AI Insights")
 
@@ -180,13 +182,35 @@ elif cdi < 0.6:
 else:
     st.success("🟢 Highly Decentralized")
 
-st.markdown(f"""
-- Ownership Score: {g:.2f}  
-- Governance Score: {h:.2f}  
-- Usage Score: {e:.2f}  
+# -------------------------------
+# REAL-TIME PRICE
+# -------------------------------
+st.subheader("📈 Real-Time ETH Price")
 
-👉 Overall system shows **{'strong' if cdi>0.6 else 'moderate' if cdi>0.3 else 'weak'} decentralization**
-""")
+def fetch_price():
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+        return requests.get(url).json()["ethereum"]["usd"]
+    except:
+        return None
+
+placeholder = st.empty()
+prices = []
+
+for i in range(10):
+    price = fetch_price()
+    if price:
+        prices.append(price)
+
+        df_price = pd.DataFrame({
+            "Time": list(range(len(prices))),
+            "Price": prices
+        })
+
+        fig_live = px.line(df_price, x="Time", y="Price", markers=True)
+        placeholder.plotly_chart(fig_live, use_container_width=True)
+
+    time.sleep(2)
 
 # -------------------------------
 # FORMULA
