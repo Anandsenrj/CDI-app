@@ -14,7 +14,6 @@ st.set_page_config(page_title="CDI Pro Dashboard", layout="wide")
 # -------------------------------
 # AUTO REFRESH (SAFE)
 # -------------------------------
-st_autorefresh = st.experimental_rerun
 
 # -------------------------------
 # UI STYLE (UPGRADED)
@@ -153,7 +152,7 @@ st.plotly_chart(fig, use_container_width=True)
 # AUTO REFRESH BUTTON
 # -------------------------------
 if st.button("🔄 Refresh Prices"):
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------------
 # FORMULA
