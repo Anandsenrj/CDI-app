@@ -9,33 +9,70 @@ import time
 # -------------------------------
 # CONFIG
 # -------------------------------
-st.set_page_config(page_title="CDI Dashboard", layout="wide")
+st.set_page_config(page_title="CDI Pro Dashboard", layout="wide")
 
 # -------------------------------
-# UI STYLE
+# AUTO REFRESH (SAFE)
+# -------------------------------
+st_autorefresh = st.experimental_rerun
+
+# -------------------------------
+# UI STYLE (UPGRADED)
 # -------------------------------
 st.markdown("""
 <style>
 body { background:#0f172a; color:white; }
 
 .metric-card {
-    background: rgba(255,255,255,0.08);
-    backdrop-filter: blur(12px);
+    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+    backdrop-filter: blur(15px);
     border-radius: 15px;
     padding: 20px;
     text-align:center;
     transition:0.3s;
+    box-shadow:0 8px 25px rgba(0,0,0,0.3);
 }
 .metric-card:hover {
-    transform:translateY(-8px) scale(1.05);
+    transform:translateY(-10px) scale(1.05);
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 CDI Intelligence Dashboard")
+st.title("🚀 CDI Intelligence Dashboard PRO")
 
 # -------------------------------
-# INPUT
+# FETCH LIVE PRICES
+# -------------------------------
+def fetch_prices():
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,uniswap&vs_currencies=usd"
+        data = requests.get(url).json()
+        return {
+            "BTC": data["bitcoin"]["usd"],
+            "ETH": data["ethereum"]["usd"],
+            "UNI": data["uniswap"]["usd"]
+        }
+    except:
+        return None
+
+prices = fetch_prices()
+
+# -------------------------------
+# LIVE PRICE CARDS
+# -------------------------------
+st.subheader("💰 Live Crypto Prices")
+
+c1,c2,c3 = st.columns(3)
+
+if prices:
+    c1.markdown(f"<div class='metric-card'>BTC<br><b>${prices['BTC']}</b></div>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='metric-card'>ETH<br><b>${prices['ETH']}</b></div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='metric-card'>UNI<br><b>${prices['UNI']}</b></div>", unsafe_allow_html=True)
+else:
+    st.error("Failed to fetch live prices")
+
+# -------------------------------
+# DATA INPUT
 # -------------------------------
 mode = st.sidebar.radio("Data Source", ["Sample Data", "Upload CSV"])
 
@@ -68,17 +105,7 @@ def extract_usd(x):
 df["tokens"] = df["tokens"].apply(extract_usd)
 
 # -------------------------------
-# VALIDATION
-# -------------------------------
-if not {"tokens","votes","transactions"}.issubset(df.columns):
-    st.error("CSV must contain tokens, votes, transactions")
-    st.stop()
-
-st.subheader("📊 Dataset")
-st.dataframe(df)
-
-# -------------------------------
-# METRIC FUNCTIONS
+# METRICS
 # -------------------------------
 def gini(x):
     x = np.sort(x)
@@ -92,18 +119,15 @@ def entropy(x):
     p = x/np.sum(x)
     return -np.sum(p*np.log2(p+1e-9))
 
-# -------------------------------
-# CALCULATE
-# -------------------------------
 g = 1 - gini(df["tokens"])
 h = 1 - (hhi(df["votes"])/10000)
 e = entropy(df["transactions"]) / np.log2(len(df))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# METRIC CARDS
+# CDI CARDS
 # -------------------------------
-st.subheader("📊 Metrics")
+st.subheader("📊 CDI Metrics")
 
 col1,col2,col3,col4 = st.columns(4)
 
@@ -113,104 +137,23 @@ col3.markdown(f"<div class='metric-card'>Entropy<br><b>{e:.3f}</b></div>", unsaf
 col4.markdown(f"<div class='metric-card'>CDI<br><b>{cdi:.3f}</b></div>", unsafe_allow_html=True)
 
 # -------------------------------
-# PLOTLY CHARTS
+# CHARTS
 # -------------------------------
-st.subheader("📈 Interactive Charts")
+st.subheader("📈 Analytics")
 
 chart_df = pd.DataFrame({
     "Metric":["Gini","HHI","Entropy"],
     "Value":[g,h,e]
 })
 
-fig1 = px.bar(chart_df, x="Metric", y="Value", color="Metric", text="Value")
-fig1.update_layout(transition_duration=800)
-
-fig2 = px.pie(chart_df, names="Metric", values="Value")
-
-st.plotly_chart(fig1, use_container_width=True)
-st.plotly_chart(fig2, use_container_width=True)
+fig = px.bar(chart_df, x="Metric", y="Value", color="Metric")
+st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
-# MULTI PROTOCOL
+# AUTO REFRESH BUTTON
 # -------------------------------
-st.subheader("📊 Multi-Protocol Comparison")
-
-protocols = ["Uniswap","Aave","Curve"]
-results = []
-
-for p in protocols:
-    tokens = np.random.uniform(1e6,1e7,10)
-    votes = np.random.randint(50,500,10)
-    tx = np.random.uniform(1e5,1e6,10)
-
-    g_ = 1 - gini(tokens)
-    h_ = 1 - (hhi(votes)/10000)
-    e_ = entropy(tx)/np.log2(len(tx))
-    c_ = (g_+h_+e_)/3
-
-    results.append([p,c_])
-
-comp_df = pd.DataFrame(results, columns=["Protocol","CDI"])
-
-fig_comp = px.bar(comp_df, x="Protocol", y="CDI", color="Protocol")
-st.plotly_chart(fig_comp, use_container_width=True)
-
-# -------------------------------
-# TIME SERIES
-# -------------------------------
-st.subheader("📈 CDI Over Time")
-
-dates = pd.date_range(end=pd.Timestamp.today(), periods=12)
-
-ts_df = pd.DataFrame({
-    "Date": dates,
-    "CDI": np.random.uniform(cdi-0.05, cdi+0.05, len(dates))
-})
-
-fig_ts = px.line(ts_df, x="Date", y="CDI", markers=True)
-st.plotly_chart(fig_ts, use_container_width=True)
-
-# -------------------------------
-# AI INSIGHTS
-# -------------------------------
-st.subheader("🤖 AI Insights")
-
-if cdi < 0.3:
-    st.error("🔴 Highly Centralized")
-elif cdi < 0.6:
-    st.warning("🟡 Moderately Decentralized")
-else:
-    st.success("🟢 Highly Decentralized")
-
-# -------------------------------
-# REAL-TIME PRICE
-# -------------------------------
-st.subheader("📈 Real-Time ETH Price")
-
-def fetch_price():
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
-        return requests.get(url).json()["ethereum"]["usd"]
-    except:
-        return None
-
-placeholder = st.empty()
-prices = []
-
-for i in range(10):
-    price = fetch_price()
-    if price:
-        prices.append(price)
-
-        df_price = pd.DataFrame({
-            "Time": list(range(len(prices))),
-            "Price": prices
-        })
-
-        fig_live = px.line(df_price, x="Time", y="Price", markers=True)
-        placeholder.plotly_chart(fig_live, use_container_width=True)
-
-    time.sleep(2)
+if st.button("🔄 Refresh Prices"):
+    st.experimental_rerun()
 
 # -------------------------------
 # FORMULA
