@@ -2,13 +2,20 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import json
+from streamlit_autorefresh import st_autorefresh
 
 # -------------------------------
 # CONFIG
 # -------------------------------
-st.set_page_config(page_title="CDI Dashboard PRO", layout="wide")
+st.set_page_config(page_title="CDI Trading Dashboard", layout="wide")
+
+# -------------------------------
+# AUTO REFRESH (SAFE)
+# -------------------------------
+st_autorefresh(interval=10000, key="refresh")
 
 # -------------------------------
 # UI STYLE
@@ -24,7 +31,6 @@ body { background:#0f172a; color:white; }
     padding: 20px;
     text-align:center;
     transition:0.3s;
-    box-shadow:0 8px 25px rgba(0,0,0,0.3);
 }
 .metric-card:hover {
     transform:translateY(-10px) scale(1.05);
@@ -32,64 +38,67 @@ body { background:#0f172a; color:white; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 CDI Intelligence Dashboard PRO")
+st.title("🚀 CDI Trading Dashboard")
 
 # -------------------------------
-# LIVE PRICE API (FIXED)
+# LIVE PRICE + CHANGE
 # -------------------------------
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def fetch_prices():
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price"
-        params = {
-            "ids": "bitcoin,ethereum,uniswap",
-            "vs_currencies": "usd"
-        }
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {"vs_currency":"usd","ids":"bitcoin,ethereum,uniswap"}
+    return requests.get(url, params=params).json()
 
-        response = requests.get(url, params=params, timeout=5)
-
-        if response.status_code != 200:
-            return None
-
-        data = response.json()
-
-        return {
-            "BTC": data.get("bitcoin", {}).get("usd", 0),
-            "ETH": data.get("ethereum", {}).get("usd", 0),
-            "UNI": data.get("uniswap", {}).get("usd", 0)
-        }
-
-    except:
-        return None
-
-# -------------------------------
-# SHOW LIVE PRICES
-# -------------------------------
-st.subheader("💰 Live Crypto Prices")
+def color(c): return "green" if c >= 0 else "red"
 
 prices = fetch_prices()
 
-c1, c2, c3 = st.columns(3)
+st.subheader("💰 Live Crypto Prices")
 
-if prices and all(v > 0 for v in prices.values()):
-    c1.metric("BTC", f"${prices['BTC']:,}")
-    c2.metric("ETH", f"${prices['ETH']:,}")
-    c3.metric("UNI", f"${prices['UNI']:,}")
-else:
-    st.warning("⚠️ Live data unavailable")
+if prices:
+    cols = st.columns(3)
+    for col, coin in zip(cols, prices):
+        col.markdown(f"""
+        <div class='metric-card'>
+            <h3>{coin['symbol'].upper()}</h3>
+            <h2>${coin['current_price']}</h2>
+            <p style='color:{color(coin['price_change_percentage_24h'])}'>
+                {coin['price_change_percentage_24h']:.2f}%
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    c1.metric("BTC", "--")
-    c2.metric("ETH", "--")
-    c3.metric("UNI", "--")
+# -------------------------------
+# CANDLESTICK
+# -------------------------------
+def fetch_candles():
+    url = "https://api.coingecko.com/api/v3/coins/ethereum/ohlc"
+    data = requests.get(url, params={"vs_currency":"usd","days":1}).json()
+    df = pd.DataFrame(data, columns=["time","open","high","low","close"])
+    df["time"] = pd.to_datetime(df["time"], unit="ms")
+    return df
+
+st.subheader("📊 Candlestick Chart")
+
+try:
+    df_c = fetch_candles()
+    fig = go.Figure(data=[go.Candlestick(
+        x=df_c['time'],
+        open=df_c['open'],
+        high=df_c['high'],
+        low=df_c['low'],
+        close=df_c['close']
+    )])
+    fig.update_layout(template="plotly_dark", height=500)
+    st.plotly_chart(fig, use_container_width=True)
+except:
+    st.warning("Chart unavailable")
 
 # -------------------------------
 # DATA INPUT
 # -------------------------------
 mode = st.sidebar.radio("Data Source", ["Sample Data", "Upload CSV"])
-
-file = None
-if mode == "Upload CSV":
-    file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+file = st.sidebar.file_uploader("Upload CSV", type=["csv"]) if mode=="Upload CSV" else None
 
 if file:
     df = pd.read_csv(file)
@@ -100,9 +109,7 @@ else:
         "transactions":[1200,1100,1050,980,900,850,780]
     })
 
-# -------------------------------
-# FIX DICT ERROR
-# -------------------------------
+# FIX dict
 def extract_usd(x):
     if isinstance(x, dict):
         return x.get("usd", 0)
@@ -116,17 +123,7 @@ def extract_usd(x):
 df["tokens"] = df["tokens"].apply(extract_usd)
 
 # -------------------------------
-# VALIDATION
-# -------------------------------
-if not {"tokens","votes","transactions"}.issubset(df.columns):
-    st.error("CSV must contain tokens, votes, transactions")
-    st.stop()
-
-st.subheader("📊 Dataset")
-st.dataframe(df)
-
-# -------------------------------
-# METRIC FUNCTIONS
+# CDI CALC
 # -------------------------------
 def gini(x):
     x = np.sort(x)
@@ -140,97 +137,79 @@ def entropy(x):
     p = x/np.sum(x)
     return -np.sum(p*np.log2(p+1e-9))
 
-# -------------------------------
-# CALCULATE CDI
-# -------------------------------
 g = 1 - gini(df["tokens"])
 h = 1 - (hhi(df["votes"])/10000)
 e = entropy(df["transactions"]) / np.log2(len(df))
 cdi = (g+h+e)/3
 
 # -------------------------------
-# METRIC CARDS
+# METRICS
 # -------------------------------
 st.subheader("📊 CDI Metrics")
 
-col1,col2,col3,col4 = st.columns(4)
-
-col1.markdown(f"<div class='metric-card'>Gini<br><b>{g:.3f}</b></div>", unsafe_allow_html=True)
-col2.markdown(f"<div class='metric-card'>HHI<br><b>{h:.3f}</b></div>", unsafe_allow_html=True)
-col3.markdown(f"<div class='metric-card'>Entropy<br><b>{e:.3f}</b></div>", unsafe_allow_html=True)
-col4.markdown(f"<div class='metric-card'>CDI<br><b>{cdi:.3f}</b></div>", unsafe_allow_html=True)
-
-# -------------------------------
-# CHARTS
-# -------------------------------
-st.subheader("📈 Analytics")
-
-chart_df = pd.DataFrame({
-    "Metric":["Gini","HHI","Entropy"],
-    "Value":[g,h,e]
-})
-
-fig1 = px.bar(chart_df, x="Metric", y="Value", color="Metric")
-fig2 = px.pie(chart_df, names="Metric", values="Value")
-
-st.plotly_chart(fig1, use_container_width=True)
-st.plotly_chart(fig2, use_container_width=True)
+c1,c2,c3,c4 = st.columns(4)
+c1.metric("Gini", f"{g:.3f}")
+c2.metric("HHI", f"{h:.3f}")
+c3.metric("Entropy", f"{e:.3f}")
+c4.metric("CDI", f"{cdi:.3f}")
 
 # -------------------------------
-# MULTI-PROTOCOL
+# ANALYTICS
+# -------------------------------
+chart_df = pd.DataFrame({"Metric":["Gini","HHI","Entropy"],"Value":[g,h,e]})
+st.plotly_chart(px.bar(chart_df,x="Metric",y="Value",color="Metric"), use_container_width=True)
+
+# -------------------------------
+# MULTI PROTOCOL
 # -------------------------------
 st.subheader("📊 Multi-Protocol Comparison")
 
-protocols = ["Uniswap","Aave","Curve"]
-results = []
-
-for p in protocols:
-    tokens = np.random.uniform(1e6,1e7,10)
-    votes = np.random.randint(50,500,10)
-    tx = np.random.uniform(1e5,1e6,10)
-
-    g_ = 1 - gini(tokens)
-    h_ = 1 - (hhi(votes)/10000)
-    e_ = entropy(tx)/np.log2(len(tx))
-    c_ = (g_+h_+e_)/3
-
-    results.append([p,c_])
-
-comp_df = pd.DataFrame(results, columns=["Protocol","CDI"])
-
-fig_comp = px.bar(comp_df, x="Protocol", y="CDI", color="Protocol")
-st.plotly_chart(fig_comp, use_container_width=True)
+protocols=["Uniswap","Aave","Curve"]
+vals=[np.random.uniform(0.4,0.9) for _ in protocols]
+st.plotly_chart(px.bar(x=protocols,y=vals,color=protocols), use_container_width=True)
 
 # -------------------------------
 # TIME SERIES
 # -------------------------------
-st.subheader("📈 CDI Over Time")
-
 dates = pd.date_range(end=pd.Timestamp.today(), periods=12)
+ts = pd.DataFrame({"Date":dates,"CDI":np.random.uniform(cdi-0.05,cdi+0.05,12)})
+st.plotly_chart(px.line(ts,x="Date",y="CDI",markers=True), use_container_width=True)
 
-ts_df = pd.DataFrame({
-    "Date": dates,
-    "CDI": np.random.uniform(cdi-0.05, cdi+0.05, len(dates))
-})
+# -------------------------------
+# UNISWAP DATA
+# -------------------------------
+def fetch_uniswap():
+    url="https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3"
+    query="""{ pools(first:5){volumeUSD totalValueLockedUSD}}"""
+    try:
+        res=requests.post(url,json={"query":query}).json()
+        pools=res["data"]["pools"]
+        vol=sum(float(p["volumeUSD"]) for p in pools)
+        tvl=sum(float(p["totalValueLockedUSD"]) for p in pools)
+        return vol,tvl
+    except:
+        return None,None
 
-fig_ts = px.line(ts_df, x="Date", y="CDI", markers=True)
-st.plotly_chart(fig_ts, use_container_width=True)
+st.subheader("🌐 DeFi Analytics")
+
+vol,tvl=fetch_uniswap()
+if vol:
+    st.metric("Volume", f"${int(vol):,}")
+    st.metric("TVL", f"${int(tvl):,}")
 
 # -------------------------------
 # AI INSIGHTS
 # -------------------------------
 st.subheader("🤖 AI Insights")
 
-if cdi < 0.3:
-    st.error("🔴 Highly Centralized")
-elif cdi < 0.6:
-    st.warning("🟡 Moderately Decentralized")
+if cdi<0.3:
+    st.error("Highly Centralized")
+elif cdi<0.6:
+    st.warning("Moderate")
 else:
-    st.success("🟢 Highly Decentralized")
+    st.success("Highly Decentralized")
 
 # -------------------------------
 # FORMULA
 # -------------------------------
-st.subheader("📐 Formula")
-
 st.latex(r"CDI = \frac{G + H + E}{3}")
